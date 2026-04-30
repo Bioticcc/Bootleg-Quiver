@@ -41,12 +41,23 @@ namespace GraphUI
 
         private void GraphWindow_KeyDown(object? sender, KeyEventArgs e)
         {
-            // Ctrl + Z undo! very nice
+            // ctrl + z undo! very nice
             if (e.Control && e.KeyCode == Keys.Z)
             {
                 controller.Undo();
                 e.SuppressKeyPress = true;
+                return;
+            }
+
+            // deletes selected edges! very nice indeed
+            if (e.KeyCode == Keys.Back || e.KeyCode == Keys.Delete)
+            {
+                canvas.DeleteSelected();
+                e.SuppressKeyPress = true;
+                return;
             }
         }
+
+
     }
 }

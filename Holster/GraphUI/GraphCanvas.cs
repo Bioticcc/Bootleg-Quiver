@@ -1,6 +1,8 @@
 ﻿using GraphEngine;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
+using System.Windows.Forms.VisualStyles;
 
 namespace GraphUI
 {
@@ -27,6 +29,10 @@ namespace GraphUI
 
         // for editing edges
         private Edge? editingEdge = null;
+
+        // for selecting edges
+        private Vertex? selectedVertex = null;
+        private Edge? selectedEdge = null;
 
 
         // constructor with given controller.
@@ -91,6 +97,20 @@ namespace GraphUI
             {
                 return;
             }
+
+            // new selection stuff! we get the selected vertex first,
+            selectedVertex = GetVertexAtPixel(e.Location);
+            
+            // set the selected edge to null
+            selectedEdge = null; 
+
+            // if the vertex is null, get the edge at that pixel. otherwise we proceed with the vertex!
+            if (selectedVertex == null)
+            {
+                selectedEdge = GetEdgeAtPixel(e.Location);
+            }
+
+            this.Invalidate();
 
             // we get the vertex at the initial clicks location
             Vertex? clickedVertex = GetVertexAtPixel(e.Location);
@@ -250,6 +270,37 @@ namespace GraphUI
             {
                 PointF pixelPoint = CoordsToPixels(vertex.Position);
 
+                // new selection stuff, first we check if the vertex is equal to a selected vertex.
+                if (vertex == selectedVertex)
+                {
+                    // get a highlight colored pen
+                    using Pen highlightPen = new Pen(Color.Blue, 2);
+
+                    // if it doesnt have a label, just highlight the usual vertex orb
+                    if (string.IsNullOrWhiteSpace(vertex.Label))
+                    {
+                        float highlightRadius = 11;
+
+                        g.DrawEllipse(
+                            highlightPen,
+                            pixelPoint.X - highlightRadius,
+                            pixelPoint.Y - highlightRadius,
+                            highlightRadius * 2,
+                            highlightRadius * 2);
+                    }
+                    // if it does have a label, get the rectangle that is its bounds, and highlight.
+                    else
+                    {
+                        RectangleF bounds = GetVertexBounds(vertex);
+                        g.DrawRectangle(
+                            highlightPen,
+                            bounds.X,
+                            bounds.Y,
+                            bounds.Width,
+                            bounds.Height);
+                    }
+                }
+
                 // if no label, display as normal
                 if (string.IsNullOrWhiteSpace(vertex.Label))
                 {
@@ -291,8 +342,11 @@ namespace GraphUI
                 // for the arrow/text
                 PointF start = GetEdgePointOutsideVertex(edge.Start, endCenter);
                 PointF end = GetEdgePointOutsideVertex(edge.End, startCenter);
-                
-                using Pen edgePen = new Pen(Color.Black, 2);
+
+                // updated pen settings for selected edges being a diff color.
+                using Pen edgePen = new Pen(
+                    edge == selectedEdge ? Color.Blue : Color.Black,
+                    edge == selectedEdge ? 4 : 2);
 
                 // if directed edge, add an arrow
                 if (edge.IsDirected)
@@ -585,6 +639,27 @@ namespace GraphUI
                 center.Y - textSize.Height / 2f - 2,
                 textSize.Width + 8,
                 textSize.Height + 4);
+        }
+
+        // using our graphcontroller functions, deletes the selected objects
+        public void DeleteSelected()
+        {
+            if (selectedEdge != null)
+            {
+                controller.DeleteEdge(selectedEdge);
+                selectedEdge = null;
+                selectedVertex = null;
+                this.Invalidate();
+                return;
+            }
+
+            if (selectedVertex != null)
+            {
+                controller.DeleteVertex(selectedVertex);
+                selectedVertex = null;
+                selectedEdge = null;
+                this.Invalidate();
+            }
         }
     }
 }

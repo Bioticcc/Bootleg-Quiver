@@ -100,6 +100,59 @@ namespace GraphEngine
             NotifyGraphChanged();
         }
 
+        // Here we delete the selected edge/edges.
+        public void DeleteEdge(Edge edge)
+        {
+            if (!Edges.Contains(edge))
+            {
+                return;
+            }
+
+            Edges.Remove(edge);
+
+            undoStack.Push(new UndoAction("Delete Edge", () =>
+            {
+                Edges.Add(edge);
+            }));
+
+            NotifyGraphChanged();
+        }
+
+        // here we delete the selected vertex, and any connected edges.
+        public void DeleteVertex(Vertex vertex)
+        {
+            if (!Vertices.Contains(vertex))
+            {
+                return;
+            }
+
+            // the list of edges that connect to our vertex that we want to delete.
+            List<Edge> connectedEdges = Edges
+                .Where(edge => edge.Start == vertex || edge.End == vertex)
+                .ToList();
+
+            // remove from our list of vertices
+            Vertices.Remove(vertex);
+
+            // remove each connected edge
+            foreach (Edge edge in connectedEdges)
+            {
+                Edges.Remove(edge);
+            }
+
+            undoStack.Push(new UndoAction("Delete Vertex", () =>
+            {
+                Vertices.Add(vertex);
+
+                foreach (Edge edge in connectedEdges)
+                {
+                    Edges.Add(edge);
+                }
+            }));
+
+            NotifyGraphChanged();
+        }
+
         // Events
         private void NotifyGraphChanged()
         {
