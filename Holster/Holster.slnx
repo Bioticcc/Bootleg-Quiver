@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="GraphEngine/GraphEngine.csproj" />
+  <Project Path="GraphUI/GraphUI.csproj" />
+</Solution>
