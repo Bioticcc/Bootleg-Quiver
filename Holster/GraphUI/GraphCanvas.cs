@@ -1,6 +1,7 @@
 ﻿using GraphEngine;
 using System.Drawing;
 using System.Linq;
+using System.Net.NetworkInformation;
 using System.Windows.Forms;
 using System.Windows.Forms.VisualStyles;
 
@@ -11,12 +12,23 @@ namespace GraphUI
     /// </summary>
     internal class GraphCanvas : Panel
     {
+        // ------------------------------------
+        // Fields, properties and our Constructor
+        // ------------------------------------
         // our controller object
         private readonly GraphController controller;
 
         private float zoom = 1.0f;
         private PointF cameraOffset = new PointF(0, 0);
         private int gridSize = 50;
+        private const float MinZoom = 0.25f;
+        private const float MaxZoom = 3.0f;
+
+        // scaling for vertices/edges/buffers
+        private float VertexRadius => 4.5f * zoom;
+        private float EdgeThickness => Math.Max(1.0f, 1.5f * zoom);
+        private float ArrowSize => 2.5f * zoom;
+        private float HitDistance => 10 * zoom;
 
         // for editing the labels of vertices
         private TextBox? editBox = null;
@@ -34,6 +46,8 @@ namespace GraphUI
         private Vertex? selectedVertex = null;
         private Edge? selectedEdge = null;
 
+        // for the edge editing popup
+        private Panel? edgeOptionsPanel = null;
 
         // constructor with given controller.
         public GraphCanvas(GraphController controller)
@@ -53,143 +67,14 @@ namespace GraphUI
             this.MouseUp += GraphCanvas_MouseUp;
         }
 
+        // ------------------------------------
+        // Main Event Handlers
+        // ------------------------------------
+
         // event call for GraphChanged
         private void Controller_GraphChanged(object? sender, System.EventArgs e)
         {
             // default function for winforms Panel, marks a "section" as needing to be redrawn/changed.
-            this.Invalidate();
-        }
-
-        // event call for MouseDoubleCLick, does various things. see within
-
-        private void GraphCanvas_MouseDoubleClick(object? sender, MouseEventArgs e)
-        {
-            // the vertex we clicked, if at all
-            Vertex? clickedVertex = GetVertexAtPixel(e.Location);
-
-            if (clickedVertex != null)
-            {
-                StartEditingVertex(clickedVertex);
-                return;
-            }
-
-            // the edge we clicked, if at all
-            Edge? clickedEdge = GetEdgeAtPixel(e.Location);
-
-            if (clickedEdge != null)
-            {
-                StartEditingEdge(clickedEdge, e.Location);
-                return;
-            }
-
-            PointF coordsPoint = PixelsToCoords(e.Location);
-            PointF snappedPoint = SnapToGridCellCenter(coordsPoint);
-
-            controller.AddVertex(snappedPoint);
-        }
-
-        // event call for when we hold our mouse down, drawing an edge
-
-        private void GraphCanvas_MouseDown(object? sender, MouseEventArgs e)
-        {
-            // if we are holding left mouse button down
-            if (e.Button != MouseButtons.Left)
-            {
-                return;
-            }
-
-            // new selection stuff! we get the selected vertex first,
-            selectedVertex = GetVertexAtPixel(e.Location);
-            
-            // set the selected edge to null
-            selectedEdge = null; 
-
-            // if the vertex is null, get the edge at that pixel. otherwise we proceed with the vertex!
-            if (selectedVertex == null)
-            {
-                selectedEdge = GetEdgeAtPixel(e.Location);
-            }
-
-            this.Invalidate();
-
-            // we get the vertex at the initial clicks location
-            Vertex? clickedVertex = GetVertexAtPixel(e.Location);
-
-            // if it exists, set the start vertex, current loc, and bool
-            if (clickedVertex != null)
-            {
-                edgeStartVertex = clickedVertex;
-                currentMousePixel = e.Location;
-                isDrawingEdge = true;
-            }
-        }
-
-        // event call for when we move the mouse while drawing an edge is true
-        private void GraphCanvas_MouseMove(object? sender, MouseEventArgs e)
-        {
-            // if we are drawing an edge, continue
-            if (!isDrawingEdge)
-            {
-                return;
-            }
-
-            // update the invalidate function with the location, telling th UI this section needs updates
-            currentMousePixel = e.Location;
-            this.Invalidate();
-        }
-
-        // event call for when we finish drawing the edge, and release the click.
-        private void GraphCanvas_MouseUp(object? sender, MouseEventArgs e)
-        {
-            // if we are drawing an edge, an the start vertex exists continue
-            if (!isDrawingEdge || edgeStartVertex == null)
-            {
-                return;
-            }
-
-            // get the vertex at the end of our edge
-            Vertex? endVertex = GetVertexAtPixel(e.Location);
-
-            // if it doesnt exist, make a new one at the center of the cell.
-            if (endVertex == null)
-            {
-                PointF coordsPoint = PixelsToCoords(e.Location);
-                PointF snappedPoint = SnapToGridCellCenter(coordsPoint);
-
-                endVertex = controller.AddVertex(snappedPoint);
-            }
-           
-            // if it does exist, add the edge to teh controller.
-            if (endVertex != edgeStartVertex)
-            {
-                controller.AddEdge(edgeStartVertex, endVertex);
-            }
-
-            edgeStartVertex = null;
-            isDrawingEdge = false;
-
-            this.Invalidate();
-        }
-
-        // used for panning the camera across the graph canvas
-        public void Pan(float dx, float dy)
-        {
-            cameraOffset.X += dx;
-            cameraOffset.Y += dy;
-            this.Invalidate();
-        }
-
-        // zooms in 
-        public void ZoomIn()
-        {
-            zoom *= 1.1f;
-            this.Invalidate();
-        }
-
-        // zooms out
-        public void ZoomOut()
-        {
-            zoom /= 1.1f;
             this.Invalidate();
         }
 
@@ -233,6 +118,235 @@ namespace GraphUI
             }
         }
 
+        // event call for when we hold our mouse down, drawing an edge
+        private void GraphCanvas_MouseDown(object? sender, MouseEventArgs e)
+        {
+
+            // if an edit box is open and click is outside it, finish editing
+            if (editBox != null && (e.Button == MouseButtons.Left))
+            {
+                // Check if click is outside the editBox bounds
+                if (!editBox.Bounds.Contains(e.Location))
+                {
+                    FinishEditingLabel(editBox, EventArgs.Empty);
+                    // After finishing, editBox is null, so don't process further selection this click
+                    return;
+                }
+            }
+
+            // if we are holding left mouse button down
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            // new selection stuff! we get the selected vertex first,
+            selectedVertex = GetVertexAtPixel(e.Location);
+            
+            // set the selected edge to null
+            selectedEdge = null;
+
+            // if the vertex is null, get the edge at that pixel. otherwise we proceed with the vertex!
+            if (selectedVertex == null)
+            {
+                selectedEdge = GetEdgeAtPixel(e.Location);
+            }
+
+            // if the edge is not null, show the panel!
+            if (selectedEdge != null)
+            {
+                ShowEdgeOptionsPanel(e.Location);
+            }
+            
+            // otherwise hide it
+            else
+            {
+                HideEdgeOptionsPanel();
+            }
+
+            this.Invalidate();
+
+            // we get the vertex at the initial clicks location
+            Vertex? clickedVertex = GetVertexAtPixel(e.Location);
+
+            // if it exists, set the start vertex, current loc, and bool
+            if (clickedVertex != null)
+            {
+                edgeStartVertex = clickedVertex;
+                currentMousePixel = e.Location;
+                isDrawingEdge = true;
+            }
+        }
+
+        // event call for when we move the mouse while drawing an edge is true
+        private void GraphCanvas_MouseMove(object? sender, MouseEventArgs e)
+        {
+            // if we are drawing an edge, continue
+            if (!isDrawingEdge)
+            {
+                return;
+            }
+
+            // update the invalidate function with the location, telling th UI this section needs updates
+            currentMousePixel = e.Location;
+            this.Invalidate();
+        }
+
+        // event call for when we finish drawing the edge, and release the click.
+        private void GraphCanvas_MouseUp(object? sender, MouseEventArgs e)
+        {
+            // if we are drawing an edge, an the start vertex exists continue
+            if (!isDrawingEdge || edgeStartVertex == null)
+            {
+                return;
+            }
+
+            // get the snapped position at the end of our edge
+            PointF coordsPoint = PixelsToCoords(e.Location);
+            PointF snappedPoint = SnapToGridCellCenter(coordsPoint);
+
+            // try to find an existing vertex at the snapped position
+            Vertex? endVertex = GetVertexAtSnappedPosition(snappedPoint);
+
+            if (endVertex == null)
+            {
+                endVertex = controller.AddVertex(snappedPoint);
+            }
+
+            // if it does exist, add the edge to teh controller.
+            if (endVertex != edgeStartVertex)
+            {
+                controller.AddEdge(edgeStartVertex, endVertex);
+            }
+
+            edgeStartVertex = null;
+            isDrawingEdge = false;
+
+            this.Invalidate();
+        }
+
+        // event call for MouseDoubleCLick, does various things. see within
+        private void GraphCanvas_MouseDoubleClick(object? sender, MouseEventArgs e)
+        {
+            // the vertex we clicked, if at all
+            Vertex? clickedVertex = GetVertexAtPixel(e.Location);
+
+            if (clickedVertex != null)
+            {
+                StartEditingVertex(clickedVertex);
+                return;
+            }
+
+            // the edge we clicked, if at all
+            Edge? clickedEdge = GetEdgeAtPixel(e.Location);
+
+            if (clickedEdge != null)
+            {
+                StartEditingEdge(clickedEdge, e.Location);
+                return;
+            }
+
+            PointF coordsPoint = PixelsToCoords(e.Location);
+            PointF snappedPoint = SnapToGridCellCenter(coordsPoint);
+
+            controller.AddVertex(snappedPoint);
+        }
+
+        // event for pressing enter to stop editing the box.
+        private void EditBox_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                FinishEditingLabel(sender, e);
+            }
+        }
+
+        // ------------------------------------
+        // General canvas/navigation helpers
+        // ------------------------------------
+
+        // used for panning the camera across the graph canvas
+        public void Pan(float dx, float dy)
+        {
+            cameraOffset.X += dx;
+            cameraOffset.Y += dy;
+            this.Invalidate();
+        }
+
+        // zoom in
+        public void ZoomIn()
+        {
+            ZoomAtScreenPoint(
+                new PointF(this.Width / 2f, this.Height / 2f),
+                1.1f);
+        }
+
+        // zoom out
+        public void ZoomOut()
+        {
+            ZoomAtScreenPoint(
+                new PointF(this.Width / 2f, this.Height / 2f),
+                1f / 1.1f);
+        }
+
+        // helper for zoom. Previously our zoom was moving the camera around, so we need to make the camera offset change with the zoom.
+        private void ZoomAtScreenPoint(PointF screenPoint, float zoomFactor)
+        {
+            // get the point where we are zooming
+            PointF coordsBeforeZoom = PixelsToCoords(screenPoint);
+
+            zoom *= zoomFactor;
+
+            // guards for max min zoom
+            if (zoom > MaxZoom)
+            {
+                zoom = MaxZoom;
+            }
+
+            if (zoom < MinZoom)
+            {
+                zoom = MinZoom;
+            }
+
+            // get the pixels after the zoom
+            PointF pixelAfterZoom = CoordsToPixels(coordsBeforeZoom);
+
+            // adjust the camera offset!
+            cameraOffset.X += screenPoint.X - pixelAfterZoom.X;
+            cameraOffset.Y += screenPoint.Y - pixelAfterZoom.Y;
+
+            this.Invalidate();
+        }
+
+        // graoh coords to mouse pos (pixels)
+        private PointF CoordsToPixels(PointF worldPoint)
+        {
+            return new PointF(
+                worldPoint.X * zoom + cameraOffset.X,
+                worldPoint.Y * zoom + cameraOffset.Y);
+        }
+        
+        // mouse pos (pixels) to graph coords
+        private PointF PixelsToCoords(PointF screenPoint)
+        {
+            return new PointF(
+                (screenPoint.X - cameraOffset.X) / zoom,
+                (screenPoint.Y - cameraOffset.Y) / zoom);
+        }
+
+        // helper function that just makes our vertex appear in the center, of the cell, not on the lines.
+        private PointF SnapToGridCellCenter(PointF coordsPoint)
+        {
+            float cellX = (float)Math.Floor(coordsPoint.X / gridSize);
+            float cellY = (float)Math.Floor(coordsPoint.Y / gridSize);
+
+            float snappedX = cellX * gridSize + gridSize / 2f;
+            float snappedY = cellY * gridSize + gridSize / 2f;
+
+            return new PointF(snappedX, snappedY);
+        }
+
         // Draws the grid we use for the graph
         private void DrawGrid(Graphics g)
         {
@@ -263,6 +377,105 @@ namespace GraphUI
             }
         }
 
+        // ------------------------------------
+        // Selection/delete helpers
+        // ------------------------------------
+
+        // using our graphcontroller functions, deletes the selected objects
+        public void DeleteSelected()
+        {
+            if (selectedEdge != null)
+            {
+                controller.DeleteEdge(selectedEdge);
+                selectedEdge = null;
+                selectedVertex = null;
+                HideEdgeOptionsPanel();
+                this.Invalidate();
+                return;
+            }
+
+            if (selectedVertex != null)
+            {
+                controller.DeleteVertex(selectedVertex);
+                selectedVertex = null;
+                selectedEdge = null;
+                HideEdgeOptionsPanel();
+                this.Invalidate();
+            }
+        }
+
+        // vertex hit box! its just for if we are clicking an existing  vertex or not.
+        private Vertex? GetVertexAtPixel(Point pixelPoint)
+        {
+            foreach (Vertex vertex in controller.Vertices)
+            {
+                PointF vertexPixel = CoordsToPixels(vertex.Position);
+
+                float dx = pixelPoint.X - vertexPixel.X;
+                float dy = pixelPoint.Y - vertexPixel.Y;
+                float distance = (float)Math.Sqrt(dx * dx + dy * dy);
+
+                if (distance <= HitDistance)
+                {
+                    return vertex;
+                }
+            }
+
+            return null;
+        }
+
+        // edge hit detection!
+        private Edge? GetEdgeAtPixel(Point pixelPoint)
+        {
+            foreach (Edge edge in controller.Edges)
+            {
+                PointF startCenter = CoordsToPixels(edge.Start.Position);
+                PointF endCenter = CoordsToPixels(edge.End.Position);
+                
+                PointF start = GetEdgePointOutsideVertex(edge.Start, endCenter);
+                PointF end = GetEdgePointOutsideVertex(edge.End, startCenter);
+                
+                float distance = DistanceFromPointToLineSegment(pixelPoint, start, end);
+
+                if (distance <= 8 * zoom)
+                {
+                    return edge;
+                }
+            }
+
+            return null;
+        }
+
+        // This is an overly complicated way of giving our edges an 8 pixel hitbox that we can click on, instead of the edge itself.
+        // I had to search up how to do this bit, so if that makes it not count, just gotta click the lines exactly as they appear.
+        private float DistanceFromPointToLineSegment(PointF point, PointF lineStart, PointF lineEnd)
+        {
+            float dx = lineEnd.X - lineStart.X;
+            float dy = lineEnd.Y - lineStart.Y;
+
+            if (dx == 0 && dy == 0)
+            {
+                float px = point.X - lineStart.X;
+                float py = point.Y - lineStart.Y;
+                return (float)Math.Sqrt(px * px + py * py);
+            }
+
+            float t = ((point.X - lineStart.X) * dx + (point.Y - lineStart.Y) * dy) / (dx * dx + dy * dy);
+            t = Math.Max(0, Math.Min(1, t));
+
+            float closestX = lineStart.X + t * dx;
+            float closestY = lineStart.Y + t * dy;
+
+            float distX = point.X - closestX;
+            float distY = point.Y - closestY;
+
+            return (float)Math.Sqrt(distX * distX + distY * distY);
+        }
+
+        // ------------------------------------
+        // Vertex drawing/editing helpers
+        // ------------------------------------
+
         // Draws the vertices from the controller
         private void DrawVertices(Graphics g)
         {
@@ -273,61 +486,137 @@ namespace GraphUI
                 // new selection stuff, first we check if the vertex is equal to a selected vertex.
                 if (vertex == selectedVertex)
                 {
-                    // get a highlight colored pen
-                    using Pen highlightPen = new Pen(Color.Blue, 2);
+                    // get the radius of the highlight
+                    float highlightRadius = VertexRadius + 1 * zoom;
 
-                    // if it doesnt have a label, just highlight the usual vertex orb
+                    // if it doesnt have a label, just highlight the usual vertex orb (changed from being an outline, now fills!
                     if (string.IsNullOrWhiteSpace(vertex.Label))
                     {
-                        float highlightRadius = 11;
-
-                        g.DrawEllipse(
-                            highlightPen,
+                        g.FillEllipse(
+                            Brushes.Blue,
                             pixelPoint.X - highlightRadius,
                             pixelPoint.Y - highlightRadius,
                             highlightRadius * 2,
                             highlightRadius * 2);
                     }
-                    // if it does have a label, get the rectangle that is its bounds, and highlight.
+                    // if it does have a label, change the font to blue and a slight font size increase
                     else
                     {
-                        RectangleF bounds = GetVertexBounds(vertex);
-                        g.DrawRectangle(
-                            highlightPen,
-                            bounds.X,
-                            bounds.Y,
-                            bounds.Width,
-                            bounds.Height);
+                        using Font font = new Font("Arial", 16, FontStyle.Bold);
+                        SizeF textSize = g.MeasureString(vertex.Label, font);
+
+                        g.DrawString(
+                            vertex.Label,
+                            font,
+                            Brushes.Blue,
+                            pixelPoint.X - textSize.Width / 2,
+                            pixelPoint.Y - textSize.Height / 2);
                     }
-                }
-
-                // if no label, display as normal
-                if (string.IsNullOrWhiteSpace(vertex.Label))
-                {
-                    float radius = 7;
-
-                    g.FillEllipse(
-                        Brushes.Black,
-                        pixelPoint.X - radius,
-                        pixelPoint.Y - radius,
-                        radius * 2,
-                        radius * 2);
                 }
                 else
                 {
-                    // other wise we display the label!
-                    using Font font = new Font("Arial", 14, FontStyle.Bold);
-                    SizeF textSize = g.MeasureString(vertex.Label, font);
+                    // if no label, display as normal
+                    if (string.IsNullOrWhiteSpace(vertex.Label))
+                    {
+                        // changed radius to be scaled with zoom instead of set
+                        float radius = VertexRadius;
 
-                    g.DrawString(
-                        vertex.Label,
-                        font,
-                        Brushes.Black,
-                        pixelPoint.X - textSize.Width / 2,
-                        pixelPoint.Y - textSize.Height / 2);
+                        g.FillEllipse(
+                            Brushes.Black,
+                            pixelPoint.X - radius,
+                            pixelPoint.Y - radius,
+                            radius * 2,
+                            radius * 2);
+                    }
+                    else
+                    {
+                        // other wise we display the label!
+                        using Font font = new Font("Arial", 14, FontStyle.Bold);
+                        SizeF textSize = g.MeasureString(vertex.Label, font);
+
+                        g.DrawString(
+                            vertex.Label,
+                            font,
+                            Brushes.Black,
+                            pixelPoint.X - textSize.Width / 2,
+                            pixelPoint.Y - textSize.Height / 2);
+                    }
                 }
             }
         }
+
+        // We started editing a vertex, so we make a text box, get its input, and set the vertex label
+        private void StartEditingVertex(Vertex vertex)
+        {
+            // our bool for if we are editing or not
+            editingVertex = vertex;
+
+            // gets the vertex local
+            PointF pixelPoint = CoordsToPixels(vertex.Position);
+
+            // the box we actuall input our edit into
+            editBox = new TextBox();
+            editBox.Text = vertex.Label;
+            editBox.Width = 80;
+            editBox.Height = 25;
+            editBox.Location = new Point(
+                (int)(pixelPoint.X - editBox.Width / 2),
+                (int)(pixelPoint.Y - editBox.Height / 2));
+
+
+            // stops editing once we press enter
+            editBox.KeyDown += EditBox_KeyDown;
+
+            // adds the edited box.
+            this.Controls.Add(editBox);
+            editBox.Focus();
+            editBox.SelectAll();
+        }
+
+        // helper that lets us not need createGraphics
+        private RectangleF GetVertexBounds(Vertex vertex)
+        {
+            PointF center = CoordsToPixels(vertex.Position);
+
+            if (string.IsNullOrWhiteSpace(vertex.Label))
+            {
+                float radius = VertexRadius + 2 * zoom;
+
+                return new RectangleF(
+                    center.X - radius,
+                    center.Y - radius,
+                    radius * 2,
+                    radius * 2);
+            }
+
+            using Font font = new Font("Arial", 14, FontStyle.Bold);
+            Size textSize = TextRenderer.MeasureText(vertex.Label, font);
+
+            return new RectangleF(
+                center.X - textSize.Width / 2f - 4,
+                center.Y - textSize.Height / 2f - 2,
+                textSize.Width + 8,
+                textSize.Height + 4);
+        }
+
+        // helper for the stacked vertex bug. 
+        // just checks if there is already a vertex at the position we just tried to "snap" an edge or new vertex too.
+        private Vertex? GetVertexAtSnappedPosition(PointF snappedPoint, float tolerance = 0.01f)
+        {
+            foreach (Vertex vertex in controller.Vertices)
+            {
+                if (Math.Abs(vertex.Position.X - snappedPoint.X) < tolerance &&
+                    Math.Abs(vertex.Position.Y - snappedPoint.Y) < tolerance)
+                {
+                    return vertex;
+                }
+            }
+            return null;
+        }
+
+        // ------------------------------------
+        // Edge drawing/editing helpers
+        // ------------------------------------
 
         // draws the edges
         private void DrawEdges(Graphics g)
@@ -346,13 +635,13 @@ namespace GraphUI
                 // updated pen settings for selected edges being a diff color.
                 using Pen edgePen = new Pen(
                     edge == selectedEdge ? Color.Blue : Color.Black,
-                    edge == selectedEdge ? 4 : 2);
+                    edge == selectedEdge ? EdgeThickness + 1.5f : EdgeThickness);
 
                 // if directed edge, add an arrow
                 if (edge.IsDirected)
                 {
                     edgePen.CustomEndCap =
-                        new System.Drawing.Drawing2D.AdjustableArrowCap(5, 5);
+                        new System.Drawing.Drawing2D.AdjustableArrowCap(ArrowSize, ArrowSize);
                 }
 
                 g.DrawLine(edgePen, start, end);
@@ -406,172 +695,6 @@ namespace GraphUI
                 centerY + dy * scale);
         }
 
-        // graoh coords to mouse pos (pixels)
-        private PointF CoordsToPixels(PointF worldPoint)
-        {
-            return new PointF(
-                worldPoint.X * zoom + cameraOffset.X,
-                worldPoint.Y * zoom + cameraOffset.Y);
-        }
-        
-        // mouse pos (pixels) to graph coords
-        private PointF PixelsToCoords(PointF screenPoint)
-        {
-            return new PointF(
-                (screenPoint.X - cameraOffset.X) / zoom,
-                (screenPoint.Y - cameraOffset.Y) / zoom);
-        }
-
-        // helper function that just makes our vertex appear in the center, of the cell, not on the lines.
-        private PointF SnapToGridCellCenter(PointF coordsPoint)
-        {
-            float cellX = (float)Math.Floor(coordsPoint.X / gridSize);
-            float cellY = (float)Math.Floor(coordsPoint.Y / gridSize);
-
-            float snappedX = cellX * gridSize + gridSize / 2f;
-            float snappedY = cellY * gridSize + gridSize / 2f;
-
-            return new PointF(snappedX, snappedY);
-        }
-
-        // vertex hit box! its just for if we are clicking an existing  vertex or not.
-        private Vertex? GetVertexAtPixel(Point pixelPoint)
-        {
-            foreach (Vertex vertex in controller.Vertices)
-            {
-                PointF vertexPixel = CoordsToPixels(vertex.Position);
-
-                float dx = pixelPoint.X - vertexPixel.X;
-                float dy = pixelPoint.Y - vertexPixel.Y;
-                float distance = (float)Math.Sqrt(dx * dx + dy * dy);
-
-                if (distance <= 12)
-                {
-                    return vertex;
-                }
-            }
-
-            return null;
-        }
-
-        // We started editing a vertex, so we make a text box, get its input, and set the vertex label
-        private void StartEditingVertex(Vertex vertex)
-        {
-            // our bool for if we are editing or not
-            editingVertex = vertex;
-
-            // gets the vertex local
-            PointF pixelPoint = CoordsToPixels(vertex.Position);
-
-            // the box we actuall input our edit into
-            editBox = new TextBox();
-            editBox.Text = vertex.Label;
-            editBox.Width = 80;
-            editBox.Height = 25;
-            editBox.Location = new Point(
-                (int)(pixelPoint.X - editBox.Width / 2),
-                (int)(pixelPoint.Y - editBox.Height / 2));
-
-            // stops editing once we press enter
-            editBox.KeyDown += EditBox_KeyDown;
-
-            // adds the edited box.
-            this.Controls.Add(editBox);
-            editBox.Focus();
-            editBox.SelectAll();
-        }
-
-        // event for pressing enter to stop editing the box.
-        private void EditBox_KeyDown(object? sender, KeyEventArgs e)
-        {
-            if (e.KeyCode == Keys.Enter)
-            {
-                e.SuppressKeyPress = true;
-                FinishEditingLabel(sender, e);
-            }
-        }
-
-        // we finish editing the vertex/label
-        private void FinishEditingLabel(object? sender, EventArgs e)
-        {
-            if (editBox == null)
-            {
-                return;
-            }
-
-            TextBox boxToRemove = editBox;
-            Vertex? vertexToRename = editingVertex;
-            Edge? edgeToRename = editingEdge;
-
-            editBox = null;
-            editingVertex = null;
-            editingEdge = null;
-
-            if (vertexToRename != null)
-            {
-                controller.RenameVertex(vertexToRename, boxToRemove.Text);
-            }
-
-            if (edgeToRename != null)
-            {
-                controller.RenameEdge(edgeToRename, boxToRemove.Text);
-            }
-
-            boxToRemove.KeyDown -= EditBox_KeyDown;
-
-            this.Controls.Remove(boxToRemove);
-            boxToRemove.Dispose();
-
-            this.Invalidate();
-        }
-
-        // edge hit detection!
-        private Edge? GetEdgeAtPixel(Point pixelPoint)
-        {
-            foreach (Edge edge in controller.Edges)
-            {
-                PointF startCenter = CoordsToPixels(edge.Start.Position);
-                PointF endCenter = CoordsToPixels(edge.End.Position);
-                
-                PointF start = GetEdgePointOutsideVertex(edge.Start, endCenter);
-                PointF end = GetEdgePointOutsideVertex(edge.End, startCenter);
-                
-                float distance = DistanceFromPointToLineSegment(pixelPoint, start, end);
-
-                if (distance <= 8)
-                {
-                    return edge;
-                }
-            }
-
-            return null;
-        }
-
-
-        private float DistanceFromPointToLineSegment(PointF point, PointF lineStart, PointF lineEnd)
-        {
-            float dx = lineEnd.X - lineStart.X;
-            float dy = lineEnd.Y - lineStart.Y;
-
-            if (dx == 0 && dy == 0)
-            {
-                float px = point.X - lineStart.X;
-                float py = point.Y - lineStart.Y;
-                return (float)Math.Sqrt(px * px + py * py);
-            }
-
-            float t = ((point.X - lineStart.X) * dx + (point.Y - lineStart.Y) * dy) / (dx * dx + dy * dy);
-            t = Math.Max(0, Math.Min(1, t));
-
-            float closestX = lineStart.X + t * dx;
-            float closestY = lineStart.Y + t * dy;
-
-            float distX = point.X - closestX;
-            float distY = point.Y - closestY;
-
-            return (float)Math.Sqrt(distX * distX + distY * distY);
-        }
-        
         // just like with the vertices, we start editing an edge
         private void StartEditingEdge(Edge edge, Point pixelPoint)
         {
@@ -621,45 +744,108 @@ namespace GraphUI
 
         }
 
-        // helper that lets us not need createGraphics
-        private RectangleF GetVertexBounds(Vertex vertex)
+        // Shows the Edge Panel. Details within
+        private void ShowEdgeOptionsPanel(Point location)
         {
-            PointF center = CoordsToPixels(vertex.Position);
+            // first hides any previous one
+            HideEdgeOptionsPanel();
 
-            if (string.IsNullOrWhiteSpace(vertex.Label))
+            // making a new Panel object. Edit later for prettiness
+            edgeOptionsPanel = new Panel();
+            edgeOptionsPanel.Width = 150;
+            edgeOptionsPanel.Height = 130;
+            edgeOptionsPanel.BackColor = Color.White;
+            edgeOptionsPanel.BorderStyle = BorderStyle.FixedSingle;
+            edgeOptionsPanel.Location = new Point(location.X + 10, location.Y + 10);
+
+            // makes the button that calls our reverse function in controller.
+            Button reverseButton = new Button();
+            reverseButton.Text = "Reverse";
+            reverseButton.Width = 130;
+            reverseButton.Height = 50;
+            reverseButton.Location = new Point(10, 8);
+
+            // if the newly created button is clicked, we call reverse edge in the controller.
+            reverseButton.Click += (sender, e) =>
             {
-                return new RectangleF(center.X - 10, center.Y - 10, 20, 20);
-            }
+                if (selectedEdge != null)
+                {
+                    controller.ReverseEdge(selectedEdge);
+                }
+            };
 
-            using Font font = new Font("Arial", 14, FontStyle.Bold);
-            Size textSize = TextRenderer.MeasureText(vertex.Label, font);
+            // adding a toggle button.
+            Button toggleButton = new Button();
+            toggleButton.Text = "Toggle Directed";
+            toggleButton.Width = 130;
+            toggleButton.Height = 50;
+            toggleButton.Location = new Point(10, 60);
 
-            return new RectangleF(
-                center.X - textSize.Width / 2f - 4,
-                center.Y - textSize.Height / 2f - 2,
-                textSize.Width + 8,
-                textSize.Height + 4);
+            // if clicked, call controllers toggle directed edge.
+            toggleButton.Click += (sender, e) =>
+            {
+                if (selectedEdge != null)
+                {
+                    controller.ToggleEdgeDirected(selectedEdge);
+                }
+            };
+
+            // adds both buttons to controls
+            edgeOptionsPanel.Controls.Add(reverseButton);
+            edgeOptionsPanel.Controls.Add(toggleButton);
+
+            // adds the panel and brings it to the front.
+            this.Controls.Add(edgeOptionsPanel);
+            edgeOptionsPanel.BringToFront();
         }
 
-        // using our graphcontroller functions, deletes the selected objects
-        public void DeleteSelected()
+        // hides the edge panel. just removes it from controls and disposes.
+        private void HideEdgeOptionsPanel()
         {
-            if (selectedEdge != null)
+            if (edgeOptionsPanel != null)
             {
-                controller.DeleteEdge(selectedEdge);
-                selectedEdge = null;
-                selectedVertex = null;
-                this.Invalidate();
+                this.Controls.Remove(edgeOptionsPanel);
+                edgeOptionsPanel.Dispose();
+                edgeOptionsPanel = null;
+            }
+        }
+
+        // ------------------------------------
+        // Shared label-editing helpers
+        // ------------------------------------
+
+        // we finish editing the vertex/label
+        private void FinishEditingLabel(object? sender, EventArgs e)
+        {
+            if (editBox == null)
+            {
                 return;
             }
 
-            if (selectedVertex != null)
+            TextBox boxToRemove = editBox;
+            Vertex? vertexToRename = editingVertex;
+            Edge? edgeToRename = editingEdge;
+
+            editBox = null;
+            editingVertex = null;
+            editingEdge = null;
+
+            if (vertexToRename != null)
             {
-                controller.DeleteVertex(selectedVertex);
-                selectedVertex = null;
-                selectedEdge = null;
-                this.Invalidate();
+                controller.RenameVertex(vertexToRename, boxToRemove.Text);
             }
+
+            if (edgeToRename != null)
+            {
+                controller.RenameEdge(edgeToRename, boxToRemove.Text);
+            }
+
+            boxToRemove.KeyDown -= EditBox_KeyDown;
+
+            this.Controls.Remove(boxToRemove);
+            boxToRemove.Dispose();
+
+            this.Invalidate();
         }
     }
 }

@@ -18,8 +18,8 @@ namespace GraphUI
             InitializeComponent();
 
             this.Text = "H.olster, son of Q.uiver";
-            this.Width = 1000;
-            this.Height = 700;
+            this.Width = 1920;
+            this.Height = 1080;
             this.KeyPreview = true; // for key presses
 
             // our controller!

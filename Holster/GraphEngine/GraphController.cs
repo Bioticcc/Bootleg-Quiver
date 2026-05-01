@@ -30,7 +30,10 @@ namespace GraphEngine
 
             // Adding a lambda function to our undo stack that undos the action we just did,
             // so we dont have to have some gobbledegook named functions and helpers.
-            undoStack.Push(new UndoAction("Add Vertex", () => { Vertices.Remove(vertex); }));
+            undoStack.Push(new UndoAction("Add Vertex", () => 
+            { 
+                Vertices.Remove(vertex); 
+            }));
 
             NotifyGraphChanged();
             return vertex;
@@ -43,7 +46,10 @@ namespace GraphEngine
             Edges.Add(edge);
 
             // same lambda push as above.
-            undoStack.Push(new UndoAction("Add Edge", () => { Edges.Remove(edge); }));
+            undoStack.Push(new UndoAction("Add Edge", () => 
+            { 
+                Edges.Remove(edge); 
+            }));
 
             NotifyGraphChanged();
             return edge;
@@ -61,7 +67,10 @@ namespace GraphEngine
 
             vertex.Label = newLabel;
 
-            undoStack.Push(new UndoAction("Rename Vertex", () => { vertex.Label = oldLabel; }));
+            undoStack.Push(new UndoAction("Rename Vertex", () => 
+            { 
+                vertex.Label = oldLabel; 
+            }));
 
             NotifyGraphChanged();
         }
@@ -78,7 +87,10 @@ namespace GraphEngine
 
             edge.Label = newLabel;
 
-            undoStack.Push(new UndoAction("Rename Edge", () => { edge.Label = oldLabel; }));
+            undoStack.Push(new UndoAction("Rename Edge", () => 
+            { 
+                edge.Label = oldLabel; 
+            }));
 
             NotifyGraphChanged();
         }
@@ -110,9 +122,9 @@ namespace GraphEngine
 
             Edges.Remove(edge);
 
-            undoStack.Push(new UndoAction("Delete Edge", () =>
-            {
-                Edges.Add(edge);
+            undoStack.Push(new UndoAction("Delete Edge", () => 
+            { 
+                Edges.Add(edge); 
             }));
 
             NotifyGraphChanged();
@@ -127,9 +139,7 @@ namespace GraphEngine
             }
 
             // the list of edges that connect to our vertex that we want to delete.
-            List<Edge> connectedEdges = Edges
-                .Where(edge => edge.Start == vertex || edge.End == vertex)
-                .ToList();
+            List<Edge> connectedEdges = Edges.Where(edge => edge.Start == vertex || edge.End == vertex).ToList();
 
             // remove from our list of vertices
             Vertices.Remove(vertex);
@@ -140,6 +150,7 @@ namespace GraphEngine
                 Edges.Remove(edge);
             }
 
+            // push the 
             undoStack.Push(new UndoAction("Delete Vertex", () =>
             {
                 Vertices.Add(vertex);
@@ -148,6 +159,49 @@ namespace GraphEngine
                 {
                     Edges.Add(edge);
                 }
+            }));
+
+            NotifyGraphChanged();
+        }
+
+        // reverse an edge, just switches what the edges start and end vertices are.
+        public void ReverseEdge(Edge edge)
+        {
+            if (!Edges.Contains(edge))
+            {
+                return;
+            }
+
+            Vertex oldStart = edge.Start;
+            Vertex oldEnd = edge.End;
+
+            edge.Start = oldEnd;
+            edge.End = oldStart;
+
+            undoStack.Push(new UndoAction("Reverse Edge", () =>
+            {
+                edge.Start = oldStart;
+                edge.End = oldEnd;
+            }));
+
+            NotifyGraphChanged();
+        }
+
+        // toggles wether or not an edge is considered directed.
+        public void ToggleEdgeDirected(Edge edge)
+        {
+            if (!Edges.Contains(edge))
+            {
+                return;
+            }
+
+            bool oldValue = edge.IsDirected;
+
+            edge.IsDirected = !edge.IsDirected;
+
+            undoStack.Push(new UndoAction("Toggle Edge Directed", () =>
+            {
+                edge.IsDirected = oldValue;
             }));
 
             NotifyGraphChanged();
