@@ -123,7 +123,7 @@ namespace GraphUI
         {
 
             // if an edit box is open and click is outside it, finish editing
-            if (editBox != null && (e.Button == MouseButtons.Left))
+            if (editBox != null && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Right))
             {
                 // Check if click is outside the editBox bounds
                 if (!editBox.Bounds.Contains(e.Location))
@@ -134,15 +134,15 @@ namespace GraphUI
                 }
             }
 
-            // if we are holding left mouse button down
-            if (e.Button != MouseButtons.Left)
+            // if we are not holding left or right mouse button down
+            if (e.Button != MouseButtons.Left && e.Button != MouseButtons.Right)
             {
                 return;
             }
 
             // new selection stuff! we get the selected vertex first,
             selectedVertex = GetVertexAtPixel(e.Location);
-            
+
             // set the selected edge to null
             selectedEdge = null;
 
@@ -152,12 +152,12 @@ namespace GraphUI
                 selectedEdge = GetEdgeAtPixel(e.Location);
             }
 
-            // if the edge is not null, show the panel!
-            if (selectedEdge != null)
+            // if the edge is not null and we right-clicked it, show the panel!
+            if (selectedEdge != null && e.Button == MouseButtons.Right)
             {
                 ShowEdgeOptionsPanel(e.Location);
             }
-            
+
             // otherwise hide it
             else
             {
@@ -166,15 +166,18 @@ namespace GraphUI
 
             this.Invalidate();
 
-            // we get the vertex at the initial clicks location
-            Vertex? clickedVertex = GetVertexAtPixel(e.Location);
-
-            // if it exists, set the start vertex, current loc, and bool
-            if (clickedVertex != null)
+            if (e.Button == MouseButtons.Left)
             {
-                edgeStartVertex = clickedVertex;
-                currentMousePixel = e.Location;
-                isDrawingEdge = true;
+                // we get the vertex at the initial clicks location
+                Vertex? clickedVertex = GetVertexAtPixel(e.Location);
+
+                // if it exists, set the start vertex, current loc, and bool
+                if (clickedVertex != null)
+                {
+                    edgeStartVertex = clickedVertex;
+                    currentMousePixel = e.Location;
+                    isDrawingEdge = true;
+                }
             }
         }
 
@@ -810,10 +813,6 @@ namespace GraphUI
             }
         }
 
-        // ------------------------------------
-        // Shared label-editing helpers
-        // ------------------------------------
-
         // we finish editing the vertex/label
         private void FinishEditingLabel(object? sender, EventArgs e)
         {
@@ -844,6 +843,68 @@ namespace GraphUI
 
             this.Controls.Remove(boxToRemove);
             boxToRemove.Dispose();
+
+            this.Invalidate();
+        }
+
+        // ------------------------------------
+        // Adjacency matrix stuff
+        // ------------------------------------
+
+        // OUR NEW STUFF! generating a graph from inputted adjacency matrix:
+        public void GenerateFromAdjacencyMatrix(string input)
+        {
+            // first we parse our adjacency matrix into our matrix object
+            int[,] matrix = controller.ParseAdjacencyMatrix(input);
+
+            // empty whatever was previously on the graph
+            controller.ClearGraph();
+
+            // how many vertices do we have?
+            int vertexCount = matrix.GetLength(0);
+
+            // we make our graph in a circular layout, this gets the center and radius.
+            PointF screenCenter = new PointF(this.Width / 2f, this.Height / 2f);
+            PointF coordsCenter = PixelsToCoords(screenCenter);
+            
+            float layoutRadius = gridSize * Math.Max(2, vertexCount / 2);
+
+            // this is how we keep track of the vertices we have made so they can be referenced later
+            List<Vertex> generatedVertices = new List<Vertex>();
+
+            // create one vertex per matrix row
+            for (int i = 0; i < vertexCount; i++)
+            {
+                //space our vertices out in a circle
+                double angle = 2 * Math.PI * i / vertexCount;
+
+                float x = coordsCenter.X + layoutRadius * (float)Math.Cos(angle);
+                float y = coordsCenter.Y + layoutRadius * (float)Math.Sin(angle);
+
+                // where we put the vertex
+                PointF snappedPoint = SnapToGridCellCenter(new PointF(x, y));
+
+                // create a new vertex at that point, and label it
+                Vertex vertex = controller.AddVertex(snappedPoint);
+                vertex.Label = "v" + (i + 1);
+                
+                // add it to our generated vertices
+                generatedVertices.Add(vertex);
+            }
+
+            // loop through every entry in the matrix
+            for (int row = 0; row < vertexCount; row++)
+            {
+                for (int col = 0; col < vertexCount; col++)
+                {
+                    // if an edge exists from the vertex row to the vertex col, we create it.
+                    if (matrix[row, col] == 1)
+                    {
+                        // create the edge
+                        controller.AddEdge(generatedVertices[row], generatedVertices[col]);
+                    }
+                }
+            }
 
             this.Invalidate();
         }

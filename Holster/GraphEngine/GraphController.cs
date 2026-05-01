@@ -1,6 +1,7 @@
-﻿    using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Text;
 
 namespace GraphEngine
@@ -10,6 +11,10 @@ namespace GraphEngine
     /// </summary>
     public class GraphController
     {
+        // ------------------------------------
+        // Fields and properties
+        // ------------------------------------
+
         // list of vertices
         public List<Vertex> Vertices { get; } = new();
         
@@ -20,7 +25,11 @@ namespace GraphEngine
         private Stack<UndoAction> undoStack = new();
 
         // event for changing something on the graph
-        public event EventHandler GraphChanged;
+        public event EventHandler? GraphChanged;
+
+        // ------------------------------------
+        // Helpers
+        // ------------------------------------
 
         // adding a vertex to the given position.
         public Vertex AddVertex(PointF position)
@@ -95,19 +104,45 @@ namespace GraphEngine
             NotifyGraphChanged();
         }
 
-        // our Undo action
-        public void Undo()
+        // reverse an edge, just switches what the edges start and end vertices are.
+        public void ReverseEdge(Edge edge)
         {
-            if (undoStack.Count == 0)
+            if (!Edges.Contains(edge))
             {
                 return;
             }
 
-            // get the undo action
-            UndoAction action = undoStack.Pop();
-            
-            // call its personal undo
-            action.Undo();
+            Vertex oldStart = edge.Start;
+            Vertex oldEnd = edge.End;
+
+            edge.Start = oldEnd;
+            edge.End = oldStart;
+
+            undoStack.Push(new UndoAction("Reverse Edge", () =>
+            {
+                edge.Start = oldStart;
+                edge.End = oldEnd;
+            }));
+
+            NotifyGraphChanged();
+        }
+
+        // toggles wether or not an edge is considered directed.
+        public void ToggleEdgeDirected(Edge edge)
+        {
+            if (!Edges.Contains(edge))
+            {
+                return;
+            }
+
+            bool oldValue = edge.IsDirected;
+
+            edge.IsDirected = !edge.IsDirected;
+
+            undoStack.Push(new UndoAction("Toggle Edge Directed", () =>
+            {
+                edge.IsDirected = oldValue;
+            }));
 
             NotifyGraphChanged();
         }
@@ -164,50 +199,135 @@ namespace GraphEngine
             NotifyGraphChanged();
         }
 
-        // reverse an edge, just switches what the edges start and end vertices are.
-        public void ReverseEdge(Edge edge)
+        // clears the existing graph for when we load in new data.
+        public void ClearGraph()
         {
-            if (!Edges.Contains(edge))
+            Vertices.Clear();
+            Edges.Clear();
+            NotifyGraphChanged();
+        }
+
+        // our Undo action
+        public void Undo()
+        {
+            if (undoStack.Count == 0)
             {
                 return;
             }
 
-            Vertex oldStart = edge.Start;
-            Vertex oldEnd = edge.End;
-
-            edge.Start = oldEnd;
-            edge.End = oldStart;
-
-            undoStack.Push(new UndoAction("Reverse Edge", () =>
-            {
-                edge.Start = oldStart;
-                edge.End = oldEnd;
-            }));
+            // get the undo action
+            UndoAction action = undoStack.Pop();
+            
+            // call its personal undo
+            action.Undo();
 
             NotifyGraphChanged();
         }
 
-        // toggles wether or not an edge is considered directed.
-        public void ToggleEdgeDirected(Edge edge)
+        // ------------------------------------
+        // Parsing function
+        // ------------------------------------
+
+        // our parser for the input string for the adjacency matrix.
+        public int[,] ParseAdjacencyMatrix(string input)
         {
-            if (!Edges.Contains(edge))
+            // removes whitespace at ends
+            input = input.Trim();
+
+            if (string.IsNullOrWhiteSpace(input))
             {
-                return;
+                throw new Exception("Matrix input cannot be empty.");
             }
 
-            bool oldValue = edge.IsDirected;
+            // split the input into rowstrings by chopping at each closing matrice bracket and comma.
+            string[] rowStrings = input.Split(
+                new string[] { "]," },
+                StringSplitOptions.RemoveEmptyEntries);
 
-            edge.IsDirected = !edge.IsDirected;
+            // our rows
+            List<int[]> rows = new List<int[]>();
 
-            undoStack.Push(new UndoAction("Toggle Edge Directed", () =>
+            foreach (string rawRow in rowStrings)
             {
-                edge.IsDirected = oldValue;
-            }));
+                // get rid of any remaining brackets and replace with empty. trim whitespace again.
+                string rowText = rawRow
+                    .Replace("[", "")
+                    .Replace("]", "")
+                    .Trim();
 
-            NotifyGraphChanged();
+                // split by comma, for each int in the row
+                string[] valueStrings = rowText.Split(
+                    new char[] { ',' },
+                    StringSplitOptions.RemoveEmptyEntries);
+
+                // our rowValues array of integers
+                int[] rowValues = new int[valueStrings.Length];
+
+                for (int i = 0; i < valueStrings.Length; i++)
+                {
+                    // cleans the whitespace again
+                    string valueText = valueStrings[i].Trim();
+
+                    // then trys to get the integer, otherwise complain
+                    if (!int.TryParse(valueText, out int value))
+                    {
+                        throw new Exception("Matrix entries must be integers.");
+                    }
+
+                    // if its not 0 or 1 complain
+                    if (value != 0 && value != 1)
+                    {
+                        throw new Exception("Matrix entries must be only 0 or 1.");
+                    }
+
+                    // sets the rowvalue for that index to the value.
+                    rowValues[i] = value;
+                }
+                
+                // once we get the full row parsed, add it to rows.
+                rows.Add(rowValues);
+            }
+
+            // ours row and col counts
+            int rowCount = rows.Count;
+            int columnCount = rows[0].Length;
+
+            // if its not a square, complain
+            if (rowCount != columnCount)
+            {
+                throw new Exception("Adjacency matrix must be square.");
+            }
+
+            // creating our 2d matrix
+            int[,] matrix = new int[rowCount, columnCount];
+
+            for (int row = 0; row < rowCount; row++)
+            {
+                // if any row does not have the correct num of columns, complain.
+                if (rows[row].Length != columnCount)
+                {
+                    throw new Exception("Every row must have the same number of entries.");
+                }
+
+                for (int col = 0; col < columnCount; col++)
+                {
+                    // if has loops, complain. (havent added this yet. Unsure if will have time.
+                    if (row == col && rows[row][col] != 0)
+                    {
+                        throw new Exception("Loops are not currently supported, so diagonal entries must be 0.");
+                    }
+
+                    matrix[row, col] = rows[row][col];
+                }
+            }
+
+            // return our parsed matrix!
+            return matrix;
         }
 
+        // ------------------------------------
         // Events
+        // ------------------------------------
         private void NotifyGraphChanged()
         {
             GraphChanged?.Invoke(this, EventArgs.Empty);

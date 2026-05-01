@@ -37,10 +37,18 @@ namespace GraphUI
 
             // subscribed event for mouse actions
             this.MouseEnter += (sender, e) => this.Focus();
+
+            // panel for adjacency matrix inputs.
+            matrixInputPanel.Visible = false;
         }
 
         private void GraphWindow_KeyDown(object? sender, KeyEventArgs e)
         {
+            if (matrixInputTextBox.Focused)
+            {
+                return;
+            }
+
             // ctrl + z undo! very nice
             if (e.Control && e.KeyCode == Keys.Z)
             {
@@ -58,6 +66,39 @@ namespace GraphUI
             }
         }
 
+        // auto generated button function for the menu strip. filled with our panel.
+        private void generateGraphFromAdjacencyMatrixToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            matrixInputPanel.Visible = true;
+            matrixInputPanel.BringToFront();
 
+            matrixInputTextBox.Clear();
+            matrixInputTextBox.Focus();
+        }
+
+        // auto generated generate graph button definition. filled within
+        private void generateMatrixButton_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                // call our canvas generate function
+                canvas.GenerateFromAdjacencyMatrix(matrixInputTextBox.Text);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    ex.Message,
+                    "Invalid Adjacency Matrix",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        // closes our panel.
+        private void closePanel_Click(object sender, EventArgs e)
+        {
+            matrixInputTextBox.Clear();
+            matrixInputPanel.Visible = false;
+        }
     }
 }
