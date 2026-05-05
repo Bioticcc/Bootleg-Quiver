@@ -698,7 +698,7 @@ namespace GraphUI
                 centerY + dy * scale);
         }
 
-        // just like with the vertices, we start editing an edge
+        // just like with the vertices, we start editing an edge.
         private void StartEditingEdge(Edge edge, Point pixelPoint)
         {
             editingEdge = edge;
