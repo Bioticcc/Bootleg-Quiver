@@ -83,8 +83,8 @@ namespace GraphUI
         {
             base.OnPaint(e);
 
-            Graphics g = e.Graphics;
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            Graphics g = e.Graphics; // makes a "drawing area" for this specific OnPaint event. 
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias; // makes edges of shapes not pixelated, but a line instead.
 
             DrawGrid(g);
             DrawEdges(g);
@@ -99,7 +99,7 @@ namespace GraphUI
 
             if ((ModifierKeys & Keys.Control) == Keys.Control)
             {
-                Pan(0, e.Delta > 0 ? 40 : -40);
+                Pan(0, e.Delta > 0 ? 40 : -40); // e.Delta is how we track how far the mouse wheel scrolled and what direction
             }
             else if ((ModifierKeys & Keys.Shift) == Keys.Shift)
             {
@@ -129,7 +129,6 @@ namespace GraphUI
                 if (!editBox.Bounds.Contains(e.Location))
                 {
                     FinishEditingLabel(editBox, EventArgs.Empty);
-                    // After finishing, editBox is null, so don't process further selection this click
                     return;
                 }
             }
@@ -192,7 +191,7 @@ namespace GraphUI
 
             // update the invalidate function with the location, telling th UI this section needs updates
             currentMousePixel = e.Location;
-            this.Invalidate();
+            this.Invalidate(); // this is where we are drawing our temporary line
         }
 
         // event call for when we finish drawing the edge, and release the click.
@@ -341,9 +340,12 @@ namespace GraphUI
         // helper function that just makes our vertex appear in the center, of the cell, not on the lines.
         private PointF SnapToGridCellCenter(PointF coordsPoint)
         {
+            // gives us the index of the cell by div then rounding down.
             float cellX = (float)Math.Floor(coordsPoint.X / gridSize);
             float cellY = (float)Math.Floor(coordsPoint.Y / gridSize);
 
+            // Then we take the grid index and mult with the gridsize to get the top left corer of the cell
+            // After getting top left, we add half the gridsize, moving to midway through the cell, giving us the center
             float snappedX = cellX * gridSize + gridSize / 2f;
             float snappedY = cellY * gridSize + gridSize / 2f;
 
@@ -608,6 +610,8 @@ namespace GraphUI
         {
             foreach (Vertex vertex in controller.Vertices)
             {
+                // tolerance was added so that we would have issues with floats giving long decimals that resulted in 
+                // technically being a nonexistent vertex, making this function return that there wasnt a vertex,
                 if (Math.Abs(vertex.Position.X - snappedPoint.X) < tolerance &&
                     Math.Abs(vertex.Position.Y - snappedPoint.Y) < tolerance)
                 {
@@ -635,10 +639,11 @@ namespace GraphUI
                 PointF start = GetEdgePointOutsideVertex(edge.Start, endCenter);
                 PointF end = GetEdgePointOutsideVertex(edge.End, startCenter);
 
-                // updated pen settings for selected edges being a diff color.
+                // updated pen settings for selected edges being a different color.
+                // instead of draw vertices longer if else for being selected, we can just do it shorter with this
                 using Pen edgePen = new Pen(
-                    edge == selectedEdge ? Color.Blue : Color.Black,
-                    edge == selectedEdge ? EdgeThickness + 1.5f : EdgeThickness);
+                    edge == selectedEdge ? Color.Blue : Color.Black, // if it is a selected edge, use blue. otherwise, black
+                    edge == selectedEdge ? EdgeThickness + 1.5f : EdgeThickness); // if it is a selected edge, make it a bit thicker. otherwise, default
 
                 // if directed edge, add an arrow
                 if (edge.IsDirected)
@@ -867,17 +872,23 @@ namespace GraphUI
             PointF screenCenter = new PointF(this.Width / 2f, this.Height / 2f);
             PointF coordsCenter = PixelsToCoords(screenCenter);
             
+            // makes a wider circle for our vertices depending on how big the gridsize is.
             float layoutRadius = gridSize * Math.Max(2, vertexCount / 2);
 
             // this is how we keep track of the vertices we have made so they can be referenced later
             List<Vertex> generatedVertices = new List<Vertex>();
 
-            // create one vertex per matrix row
+            // create all of our vertexs
             for (int i = 0; i < vertexCount; i++)
             {
                 //space our vertices out in a circle
+
+                // first we divide 360 degrees by the vertex count, we see how far apart each vertex
+                // if going to be spaced across the circle. So how many slices we need
                 double angle = 2 * Math.PI * i / vertexCount;
 
+                // using cos on the angel to find the x pos, and sin for the y pos, then mult by layout radius to scale with the circles size
+                // we get our vertex points! (coords center is so its from center of screen, NOT (0,0)
                 float x = coordsCenter.X + layoutRadius * (float)Math.Cos(angle);
                 float y = coordsCenter.Y + layoutRadius * (float)Math.Sin(angle);
 
@@ -892,7 +903,7 @@ namespace GraphUI
                 generatedVertices.Add(vertex);
             }
 
-            // loop through every entry in the matrix
+            // create all of our edges
             for (int row = 0; row < vertexCount; row++)
             {
                 for (int col = 0; col < vertexCount; col++)
